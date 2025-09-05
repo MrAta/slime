@@ -14,12 +14,9 @@ from slime.utils.http_utils import get_host_info
 
 
 def get_base_gpu_id(args, rank):
-    num_gpus = min(args.rollout_num_gpus_per_node, args.rollout_num_gpus_per_engine)
-    if args.colocate:
-        start_index = (rank * num_gpus) % args.rollout_num_gpus_per_node
-    else:
-        num_actor_gpus = args.actor_num_gpus_per_node * args.actor_num_nodes
-        start_index = (num_actor_gpus + rank * num_gpus) % args.rollout_num_gpus_per_node
+    num_gpus = min(args.engine_num_gpus_per_node, args.num_gpus_per_engine)
+    num_student_gpus = args.student_num_gpus_per_node * args.student_num_nodes
+    start_index = (num_student_gpus + rank * num_gpus) % args.engine_num_gpus_per_node
     return start_index
 
 
@@ -79,14 +76,14 @@ class SGLangEngine(RayActor):
         args = self.args
         rank = self.rank
 
-        nnodes = max(1, args.rollout_num_gpus_per_engine // args.rollout_num_gpus_per_node)
+        nnodes = max(1, args.num_gpus_per_engine // args.engine_num_gpus_per_node)
         node_rank = rank % nnodes
         kwargs = {
-            "model_path": args.hf_checkpoint,
+            "model_path": args.teacher_model_path,
             "trust_remote_code": True,
             "random_seed": args.seed + rank,
             # memory
-            "enable_memory_saver": args.offload,
+            "enable_memory_saver": False, # no colocation for now.
             # distributed
             "host": get_host_info()[1],
             "port": port,
@@ -97,7 +94,7 @@ class SGLangEngine(RayActor):
             "gpu_id_step": 1,
             "base_gpu_id": get_base_gpu_id(args, rank),
             # parallel
-            "tp_size": args.rollout_num_gpus_per_engine,
+            "tp_size": args.num_gpus_per_engine,
             "dp_size": args.sglang_dp_size,
             "pp_size": args.sglang_pp_size,
             "ep_size": args.sglang_ep_size,
