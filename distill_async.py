@@ -1,14 +1,23 @@
 import ray
-from slime.ray.distillation.placement_group import create_placement_groups, create_student_group, create_teacher_engine
+
+from slime.ray.distillation.engine import EngineManager
+from slime.ray.distillation.placement_group import create_placement_groups
+from slime.ray.distillation.student_group import RayDistillationGroup
 from slime.utils.arguments import parse_args
+
 
 def distill_async(args):
     pgs = create_placement_groups(args)
 
-    student_model = create_student_group(args, pgs["student"])
+    student_model = RayDistillationGroup(
+        args=args,
+        num_nodes=args.student_num_nodes,
+        num_gpus_per_node=args.student_num_gpus_per_node,
+        pg=pgs["student"],
+        num_gpus_per_actor=0.8,
+    )
 
-    # create the rollout manager, with sglang engines inside.
-    teacher_engine = create_teacher_engine(args, pgs["teacher"])
+    teacher_engine = EngineManager(args, pgs["teacher"])
 
     ids = student_model.async_init(args)
     assert len(set(ids)) == 1

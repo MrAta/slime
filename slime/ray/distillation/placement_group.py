@@ -3,8 +3,6 @@ import ray
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
-from .student_group import RayDistillationGroup
-
 
 @ray.remote(num_gpus=1)
 class InfoActor:
@@ -83,19 +81,3 @@ def create_placement_groups(args):
         "student": (pg, student_pg_reordered_bundle_indices),
         "teacher": (pg, teacher_pg_reordered_bundle_indices),
     }
-
-
-
-
-def create_student_group(args, pg):
-    return RayDistillationGroup(
-        args=args,
-        num_nodes=args.student_num_nodes,
-        num_gpus_per_node=args.student_num_gpus_per_node,
-        pg=pg,
-        num_gpus_per_actor=0.8,
-    )
-
-
-def creaete_teacher_engine(args, pg):
-    pass
