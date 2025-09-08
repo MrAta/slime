@@ -3,8 +3,7 @@ import ray
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
-from .actor_group import RayTrainGroup
-from .rollout import RolloutManager
+from .student_group import RayDistillationGroup
 
 
 @ray.remote(num_gpus=1)
@@ -91,12 +90,12 @@ def create_placement_groups(args):
 def create_student_group(args, pg):
     return RayDistillationGroup(
         args=args,
-        num_nodes=num_nodes,
-        num_gpus_per_node=num_gpus_per_node,
+        num_nodes=args.student_num_nodes,
+        num_gpus_per_node=args.student_num_gpus_per_node,
         pg=pg,
         num_gpus_per_actor=0.8,
     )
 
 
-def create_rollout_manager(args, pg, wandb_run_id):
-    return RolloutManager(args, pg, wandb_run_id=wandb_run_id)
+def creaete_teacher_engine(args, pg):
+    pass
