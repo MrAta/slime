@@ -41,7 +41,6 @@ def train(args):
     ray.get(actor_model.async_init_weight_update_connections(rollout_manager))
 
     # always update weight first so that sglang has the loaded weights from training.
-    ray.get(actor_model.async_update_weights())
 
     # async train loop.
     rollout_data_next_future = rollout_manager.async_generate(args.start_rollout_id)

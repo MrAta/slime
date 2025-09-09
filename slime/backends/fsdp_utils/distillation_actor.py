@@ -25,7 +25,7 @@ class FSDPDistillationRayActor(TrainRayActor):
       * For small models this is fine; for larger models consider sharded state_dict type.
     """
 
-    def init(self, args, role, wandb_run_id, with_ref: bool = False):  # type: ignore[override]
+    def init(self, args):  # type: ignore[override]
         super().init(args, role, wandb_run_id, with_ref)
         self.args = args
         torch.manual_seed(args.seed)

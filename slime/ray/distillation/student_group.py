@@ -4,7 +4,7 @@ import ray
 from ray.util.placement_group import PlacementGroup
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
-from slime.backends.fsdp_utils import FSDPTrainRayActor
+from slime.backends.fsdp_utils import FSDPDistillationRayActor
 from slime.ray.utils import NOSET_VISIBLE_DEVICES_ENV_VARS_LIST
 
 
@@ -64,7 +64,7 @@ class RayDistillationGroup:
         TrainRayActor = ray.remote(
             num_gpus=1,
             runtime_env={"env_vars": env_vars},
-        )(FSDPTrainRayActor)
+        )(FSDPDistillationRayActor)
 
         # Create worker actors
         self._actor_handlers = []
