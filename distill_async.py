@@ -1,15 +1,15 @@
 import ray
 
+from slime.backends.fsdp_utils import FSDPDistillationRayActor
 from slime.ray.distillation.engine import EngineManager
 from slime.ray.distillation.placement_group import create_placement_groups
-from slime.ray.distillation.student_group import RayDistillationGroup
 from slime.utils.arguments import parse_args
 
 
 def distill_async(args):
     pgs = create_placement_groups(args)
 
-    student_model = RayDistillationGroup(
+    student_model = FSDPDistillationRayActor(
         args=args,
         num_nodes=args.student_num_nodes,
         num_gpus_per_node=args.student_num_gpus_per_node,

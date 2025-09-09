@@ -2,12 +2,12 @@ from contextlib import nullcontext
 
 import torch
 import torch.distributed as dist
+import wandb
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardingStrategy
 from torch_memory_saver import torch_memory_saver
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-import wandb
 from slime.backends.utils.data import process_rollout_data
 from slime.ray.train_actor import TrainRayActor
 from slime.utils.distributed_utils import get_gloo_group
@@ -24,10 +24,6 @@ class FSDPTrainRayActor(TrainRayActor):
       * Initialize model/tokenizer on rank0 sequentially to avoid race on cache
       * Wrap model with FSDP
       * Provide minimal train / save / update_weights hooks compatible with existing RayTrainGroup
-
-    Weight update strategy:
-      * Rank0 gathers state_dict (full) and broadcasts tensor-by-tensor.
-      * For small models this is fine; for larger models consider sharded state_dict type.
     """
 
     def init(self, args, role, wandb_run_id, with_ref: bool = False):  # type: ignore[override]

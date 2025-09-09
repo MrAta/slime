@@ -1,4 +1,4 @@
-from .actor import FSDPTrainRayActor
 from .arguments import load_fsdp_args
+from .distillation_actor import FSDPDistillationRayActor
 
-__all__ = ["load_fsdp_args", "FSDPTrainRayActor"]
+__all__ = ["load_fsdp_args", "FSDPDistillationRayActor"]
