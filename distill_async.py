@@ -22,11 +22,18 @@ def distill_async(args):
     ids = student_model.async_init(args)
     assert len(set(ids)) == 1
     train_step = 0
+    train_data_ref = None
+    train_data_next_future = teacher_engine.async_generate()
     for train_step in range(args.num_train_steps):
-        rollout_data_ref = ray.get(teacher_engine.async_generate(train_step))
-        teacher_log_probs_ref = ray.get(teacher_engine.async_compute_log_probs(rollout_data_ref))
+        if train_data_next_future is not None:
+            train_data_ref = ray.get(train_data_next_future)
 
-        ray.get(student_model.async_distill(rollout_data_ref, teacher_log_probs_ref))
+        if train_step + 1 < args.num_train_steps:
+            train_data_next_future = teacher_engine.async_generate()
+
+        teacher_log_probs_ref = ray.get(teacher_engine.async_compute_log_probs(train_data_ref))
+
+        ray.get(student_model.async_distill(train_data_ref, teacher_log_probs_ref))
         if train_step % args.save_interval == 0:
             ray.get(student_model.async_save_model(train_step))
 
