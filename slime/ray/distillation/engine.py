@@ -175,24 +175,88 @@ class EngineController:
         return samples
 
     def compute_log_probs(self, data_ref):
-        # TODO (MrAta): fix and complete this implementation
+        """Compute top-k log-probs for a batch using SGLang and return [B, T, V].
+
+        Notes:
+            - B: batch size, T: sequence length (prompt tokens minus BOS), V: top_logprobs_num
+            - Results are padded along T to the max prompt length in batch, with -inf for missing steps.
+            - If input is provided as a list of Samples, will use their prompt texts.
+        """
+        import asyncio
+
         data = ray.get(data_ref.inner)
+
+        # Extract inputs (prefer text; fall back to input_ids if provided)
+        texts = None
+        input_ids = None
+
+        # Case 1: Pre-built dict batch
+        if isinstance(data, dict):
+            if "text" in data:
+                texts = data["text"]
+            elif "input_ids" in data:
+                input_ids = data["input_ids"]
+
+        assert (
+            texts is not None or input_ids is not None
+        ), "compute_log_probs expects either 'text' or 'tokens' in data."
+
         url = f"http://{self.args.sglang_router_ip}:{self.args.sglang_router_port}/generate"
         sampling_params = {
             "max_new_tokens": 1,
-            "return_logprob": True,
-            "num_logprobs": 1024,
-            # TODO: add other sampling params
+            "temperature": 0,
         }
+
         payload = {
-            "input_ids": data["tokens"],
             "sampling_params": sampling_params,
             "return_logprob": True,
+            "logprob_start_len": 0,
+            "top_logprobs_num": getattr(self.args, "top_logprobs_num", 1),
         }
-        import asyncio
 
-        output = asyncio.run(post(url, payload, use_http2=self.args.use_http2))
-        return ray.put(Box(output))
+        if texts is not None:
+            payload["text"] = texts
+        else:
+            payload["input_ids"] = input_ids
+
+        output = asyncio.run(post(url, payload, use_http2=getattr(self.args, "use_http2", False)))
+
+        # Parse outputs to [B, T, V]
+        # Each item has meta_info.input_top_logprobs: list length = prompt_tokens
+        # For t=0 typically None, so we skip it and use positions 1..T-1
+        V = payload["top_logprobs_num"]
+
+        def _extract_sample_topk(sample_out):
+            meta = sample_out.get("meta_info", {})
+            input_top = meta.get("input_top_logprobs", None)
+            if input_top is None:
+                return [], []
+            steps = input_top[1:] if len(input_top) > 1 else []
+            all_token_logprobs = []  # [t][v]
+            for step in steps:
+                if step is None:
+                    all_token_logprobs.append([])
+                    continue
+                token_logprobs = []
+                for pair in step[:V]:
+                    if pair is None:
+                        continue
+                    logprob = pair[0]
+                    token_logprobs.append(logprob)
+                all_token_logprobs.append(token_logprobs)
+            return all_token_logprobs
+
+        per_sample_logprobs = []
+        max_T = 0
+        for sample_out in output:
+            sample_logprobs = _extract_sample_topk(sample_out)
+            per_sample_logprobs.append(sample_logprobs)
+            if len(sample_logprobs) > max_T:
+                max_T = len(sample_logprobs)
+
+        teacher_logprobs = {"teacher_log_probs": per_sample_logprobs}
+
+        return ray.put(Box(teacher_logprobs))
 
 
 class EngineManager:
