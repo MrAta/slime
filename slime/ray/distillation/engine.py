@@ -150,13 +150,18 @@ def launch_router(args):
 
 
 @ray.remote
-class EngineController:
+class EngineManager:
     """The class to run rollout and convert rollout data to training data."""
 
-    def __init__(self, args):
+    def __init__(self, args, pg):
         self.args = args
-
+        self.pg = pg
+        launch_router(args)
         self.data_source = RolloutDataSourceWithBuffer(args)
+        self.all_engines = launch_engines(args, pg)
+        nodes_per_engine = max(1, args.engine_num_gpus_per_engine // args.engine_num_gpus_per_node)
+        # when doing multi-node serving, we will only send request to node-0 for each engine.
+        self.engines = self.all_engines[::nodes_per_engine]
 
     def generate(self):
         """
@@ -257,24 +262,3 @@ class EngineController:
         teacher_logprobs = {"teacher_log_probs": per_sample_logprobs}
 
         return ray.put(Box(teacher_logprobs))
-
-
-class EngineManager:
-    def __init__(self, args, pg):
-        self.args = args
-        launch_router(args)
-        self.controller = EngineController.options(
-            num_cpus=1,
-            num_gpus=0,
-        ).remote(args)
-
-        self.all_engines = launch_engines(args, pg)
-        nodes_per_engine = max(1, args.engine_num_gpus_per_engine // args.engine_num_gpus_per_node)
-        # when doing multi-node serving, we will only send request to node-0 for each engine.
-        self.engines = self.all_engines[::nodes_per_engine]
-
-    def async_generate(self):
-        return self.controller.generate.remote()
-
-    def async_compute_log_probs(self, data_ref):
-        return self.controller.compute_log_probs.remote(data_ref)

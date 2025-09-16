@@ -16,21 +16,21 @@ def distill_async(args):
         pg=pgs["student"],
     )
 
-    teacher_engine = EngineManager(args, pgs["teacher"])
+    teacher_engine = EngineManager.options(num_gpus=0, num_cpus=1).remote(args, pgs["teacher"])
 
     ids = student_model.async_init(args)
     assert len(set(ids)) == 1
     train_step = 0
     train_data_ref = None
-    train_data_next_future = teacher_engine.async_generate()
+    train_data_next_future = teacher_engine.generate.remote()
     for train_step in range(args.num_train_steps):
         if train_data_next_future is not None:
             train_data_ref = ray.get(train_data_next_future)
 
         if train_step + 1 < args.num_train_steps:
-            train_data_next_future = teacher_engine.async_generate()
+            train_data_next_future = teacher_engine.generate.remote()
 
-        teacher_log_probs_ref = ray.get(teacher_engine.async_compute_log_probs(train_data_ref))
+        teacher_log_probs_ref = ray.get(teacher_engine.compute_log_probs.remote(train_data_ref))
 
         ray.get(student_model.async_distill(train_data_ref, teacher_log_probs_ref))
         if train_step % args.save_interval == 0:
