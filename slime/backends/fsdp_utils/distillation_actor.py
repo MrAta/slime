@@ -1,3 +1,7 @@
+import os
+from datetime import timedelta
+
+import ray
 import torch
 import torch.distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -5,29 +9,70 @@ from torch.distributed.fsdp import ShardingStrategy
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from slime.backends.utils.data import process_rollout_data
-from slime.ray.train_actor import TrainRayActor
-from slime.utils.distributed_utils import get_gloo_group
-from slime.utils.timer import Timer
-
-from .update_weight_utils import UpdateWeightFromTensor
+from slime.utils.distributed_utils import get_gloo_group, init_gloo_group
+from slime.utils.http_utils import is_port_available
 
 
-class FSDPDistillationRayActor(TrainRayActor):
-    """Simplified TrainRayActor for pure HF+FSDP training.
+def get_local_gpu_id():
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES", None)
+    if cvd is None:
+        return ray.get_gpu_ids()[0]
+    else:
+        return cvd.split(",").index(str(ray.get_gpu_ids()[0]))
 
-    Responsibilities:
-      * Initialize model/tokenizer on rank0 sequentially to avoid race on cache
-      * Wrap model with FSDP
-      * Provide minimal train / save / update_weights hooks compatible with existing RayTrainGroup
 
-    Weight update strategy:
-      * Rank0 gathers state_dict (full) and broadcasts tensor-by-tensor.
-      * For small models this is fine; for larger models consider sharded state_dict type.
-    """
+class FSDPDistillationRayActor:
+    @staticmethod
+    def _get_current_node_ip_and_free_port(start_port=10000, consecutive=1):
+        address = ray._private.services.get_node_ip_address()
+        # strip ipv6 address
+        address = address.strip("[]")
 
-    def init(self, args):  # type: ignore[override]
-        super().init(args, role, wandb_run_id, with_ref)
+        # find the port where port, port + 1, port + 2, ... port + consecutive - 1 are all available
+        port = start_port
+        while not all(is_port_available(port + i) for i in range(consecutive)):
+            port += 1
+
+        return address, port
+
+    def get_master_addr_and_port(self):
+        return self.master_addr, self.master_port
+
+    def __init__(self, world_size, rank, master_addr, master_port):
+        self._world_size = world_size
+        self._rank = rank
+        if master_addr:
+            self.master_addr, self.master_port = master_addr, master_port
+        else:
+            self.master_addr, self.master_port = self._get_current_node_ip_and_free_port(start_port=20000)
+
+        os.environ["MASTER_ADDR"] = self.master_addr
+        os.environ["MASTER_PORT"] = str(self.master_port)
+        os.environ["WORLD_SIZE"] = str(self._world_size)
+        os.environ["RANK"] = str(self._rank)
+        # TODO: currently this doesn't work as ray has already set torch.cuda.device_count().
+        # os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        # os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
+        os.environ["LOCAL_RANK"] = str(get_local_gpu_id())
+
+    def init(self, args):
         self.args = args
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(f"cuda:{local_rank}")
+
+        dist.init_process_group(
+            backend=args.distributed_backend,
+            timeout=timedelta(minutes=args.distributed_timeout_minutes),
+        )
+        init_gloo_group()
+
+        args.rank = dist.get_rank()
+        args.world_size = dist.get_world_size()
+
+        # set current device
+        args.local_rank = args.rank % torch.cuda.device_count()
+        torch.cuda.set_device(f"cuda:{args.local_rank}")
+
         torch.manual_seed(args.seed)
 
         # Serialize tokenizer/config loading across ranks to avoid HF cache race
@@ -71,21 +116,6 @@ class FSDPDistillationRayActor(TrainRayActor):
             weight_decay=args.weight_decay,
         )
 
-        # TODO: load
-
-        self.ref_model = None
-        # TODO: support ref model
-        if with_ref:
-            raise NotImplementedError()
-
-        self.weight_updator = UpdateWeightFromTensor(self.args, self.model)
-
-        if self.args.offload:
-            self.sleep(("model"))
-
-        Timer().start("train_wait")
-        self.global_step = 0
-        self.micro_step = 0
         return 0
 
     def save_model(self, iteration, with_optimizer=True):

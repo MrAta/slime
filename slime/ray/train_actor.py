@@ -19,7 +19,7 @@ def get_local_gpu_id():
 
 
 class TrainRayActor(RayActor):
-    def __init__(self, world_size, rank, master_addr, master_port, wandb_run_id):
+    def __init__(self, world_size, rank, master_addr, master_port):
         self._world_size = world_size
         self._rank = rank
         if master_addr:
@@ -36,11 +36,8 @@ class TrainRayActor(RayActor):
         # os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
         os.environ["LOCAL_RANK"] = str(get_local_gpu_id())
 
-    def init(self, args, role, wandb_run_id, with_ref=False):
+    def init(self, args):
         self.args = args
-        self.role = role
-        self.with_ref = with_ref
-
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         torch.cuda.set_device(f"cuda:{local_rank}")
 
