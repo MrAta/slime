@@ -139,3 +139,6 @@ class FSDPDistillationRayActor:
             batch["teacher_log_probs"] = padded_teacher_log_probs["log_probs"]
 
         return
+
+    def eval(self):
+        raise NotImplementedError
