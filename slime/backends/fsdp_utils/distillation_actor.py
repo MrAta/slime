@@ -139,17 +139,3 @@ class FSDPDistillationRayActor:
             batch["teacher_log_probs"] = padded_teacher_log_probs["log_probs"]
 
         return
-
-
-def gather_log_probs(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
-    # log_probs: [B, T-1, V]; input_ids: [B, T]
-    pred_logits = logits[:, :-1]
-    log_probs_all = torch.log_softmax(pred_logits, dim=-1)
-    tgt = input_ids[:, 1:].contiguous()
-    log_probs = log_probs_all.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)
-    return log_probs
-
-
-def per_sample_mean(x, loss_mask):
-    # TODO: impl per token loss
-    return ((x * loss_mask).sum(dim=1) / loss_mask.sum(dim=1).clamp_min(1)).mean()
