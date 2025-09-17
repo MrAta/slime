@@ -78,14 +78,14 @@ class FSDPDistillationRayActor:
         # Serialize tokenizer/config loading across ranks to avoid HF cache race
         for i in range(dist.get_world_size()):
             if i == dist.get_rank():
-                self.hf_config = AutoConfig.from_pretrained(self.args.hf_checkpoint, trust_remote_code=True)
-                self.tokenizer = AutoTokenizer.from_pretrained(self.args.hf_checkpoint, trust_remote_code=True)
+                self.hf_config = AutoConfig.from_pretrained(self.args.model_path, trust_remote_code=True)
+                self.tokenizer = AutoTokenizer.from_pretrained(self.args.model_path, trust_remote_code=True)
             dist.barrier(group=get_gloo_group())
 
         # Load model
         with torch.device(f"cuda:{torch.cuda.current_device()}"):
             model = AutoModelForCausalLM.from_pretrained(
-                self.args.hf_checkpoint,
+                self.args.model_path,
                 trust_remote_code=True,
             )
         model.train()
@@ -131,12 +131,14 @@ class FSDPDistillationRayActor:
 
         train_data = process_rollout_data(self.args, rollout_data_ref, rank, world_size)
         padded_batches = self.pad_and_move_to_device(train_data)
+        student_logits = self.model(padded_batches)
 
-        teacher_log_probs = process_rollout_data(self.args, teacher_log_probs_ref, rank, world_size)
+        teacher_log_probs = ray.get(teacher_log_probs_ref)
+
         padded_teacher_log_probs = self.pad_and_move_to_device(teacher_log_probs)
 
-        for batch in padded_batches:
-            batch["teacher_log_probs"] = padded_teacher_log_probs["log_probs"]
+        # TODO: compute loss and update the model.
+        print(padded_teacher_log_probs)
 
         return
 
