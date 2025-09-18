@@ -8,6 +8,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardingStrategy
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
+from slime.backends.fsdp_utils.losses import DISTILL_LOSS_MAP
 from slime.backends.utils.data import process_rollout_data
 from slime.utils.distributed_utils import get_gloo_group, init_gloo_group
 from slime.utils.http_utils import is_port_available
@@ -89,6 +90,7 @@ class FSDPDistillationRayActor:
                 trust_remote_code=True,
             )
         model.train()
+        self.loss_fn = DISTILL_LOSS_MAP[args.distill_loss]
 
         if args.gradient_checkpointing:
             model.gradient_checkpointing_enable()
@@ -130,17 +132,34 @@ class FSDPDistillationRayActor:
         rank = dist.get_rank()
 
         train_data = process_rollout_data(self.args, rollout_data_ref, rank, world_size)
-        padded_batches = self.pad_and_move_to_device(train_data)
-        student_logits = self.model(padded_batches)
+        padded_batch = self.pad_and_move_to_device(train_data)
+        student_outputs = self.model(
+            input_ids=padded_batch["input_ids"],
+            attention_mask=padded_batch["attention_mask"],
+            labels=padded_batch["labels"],
+        )
 
         teacher_log_probs = ray.get(teacher_log_probs_ref)
 
         padded_teacher_log_probs = self.pad_and_move_to_device(teacher_log_probs)
 
-        # TODO: compute loss and update the model.
-        print(padded_teacher_log_probs)
+        distillation_loss = self.loss_fn(padded_batch["labels"], student_outputs.logits, padded_teacher_log_probs)
+        metrics = {"train_loss": student_outputs.loss}
+        total_loss = (
+            student_outputs.logits * (1 - self.args.distillation_loss_ration)
+            + distillation_loss * self.args.distillation_loss_ration
+        )
 
-        return
+        self.optimizer.zero_grad(set_to_none=True)
+        total_loss.backward()
+        self.optimizer.step()
+        metrics.update({"distillation_loss": distillation_loss, "total_train_loss": total_loss})
+        return metrics
+
+    def log_dict(self):
+        if dist.get_rank() != 0:
+            return
+        # TODO: logs the metrics/data on rank 0
 
     def eval(self):
         raise NotImplementedError
